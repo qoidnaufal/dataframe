@@ -60,12 +60,9 @@ impl DataFrame {
     }
 
     pub fn col(&self, header: &str) -> Option<Vec<&str>> {
-        let querry = self.headers.iter().position(|h| *h == header);
-        if let Some(idx) = querry {
-            Some(self.rows.iter().map(|row| row[idx].as_str()).collect::<Vec<_>>())
-        } else {
-            None
-        }
+        self.headers.iter().position(|h| *h == header).map(|idx| {
+            self.rows.iter().map(|row| row[idx].as_str()).collect::<Vec<_>>()
+        })
     }
 
     pub fn row(&self, idx: usize) -> Option<HashMap<&str, &str>> {
@@ -89,15 +86,12 @@ impl DataFrame {
     }
 
     pub fn loc<F: FnMut(&mut String)>(&mut self, header: &str, mut f: F) -> Result<(), Error> {
-        let pos = self.headers.iter().position(|h| h == header);
-        if let Some(idx) = pos {
+        self.headers.iter().position(|h| h == header).map(|idx| {
             self.rows.iter_mut().for_each(|row| {
-                row.get_mut(idx).map(|s| f(s));
+                if let Some(s) = row.get_mut(idx) { f(s) };
             });
-            Ok(())
-        } else {
-            return Err(Error::HeaderNotFound(header.to_string()));
-        }
+            
+        }).ok_or(Error::HeaderNotFound(header.to_string()))
     }
 }
 
