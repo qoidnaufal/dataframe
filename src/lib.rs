@@ -1,5 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet}, hash::Hash, io::{BufReader, Read}, path::Path
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    io::{BufReader, Read},
+    path::Path
 };
 
 mod error;
@@ -9,9 +12,9 @@ pub use error::Error;
 #[derive(Debug, Clone)]
 pub enum Val {
     String(String),
+    Usize(usize),
     Int64(i64),
     Float64(f64),
-    Usize(usize),
 }
 
 impl Hash for Val {
@@ -94,6 +97,46 @@ impl From<f64> for Val {
     }
 }
 
+impl TryFrom<&Val> for String {
+    type Error = Error;
+    fn try_from(value: &Val) -> Result<Self, Self::Error> {
+        match value {
+            Val::String(s) => Ok(s.to_owned()),
+            _ => Err(Error::ValToString)
+        }
+    }
+}
+
+impl TryFrom<&Val> for usize {
+    type Error = Error;
+    fn try_from(value: &Val) -> Result<Self, Self::Error> {
+        match value {
+            Val::Usize(n) => Ok(*n),
+            _ => Err(Error::ValToUsize)
+        }
+    }
+}
+
+impl TryFrom<&Val> for i64 {
+    type Error = Error;
+    fn try_from(value: &Val) -> Result<Self, Self::Error> {
+        match value {
+            Val::Int64(n) => Ok(*n),
+            _ => Err(Error::ValToInt64)
+        }
+    }
+}
+
+impl TryFrom<&Val> for f64 {
+    type Error = Error;
+    fn try_from(value: &Val) -> Result<Self, Self::Error> {
+        match value {
+            Val::Float64(n) => Ok(*n),
+            _ => Err(Error::ValToFloat64)
+        }
+    }
+}
+
 impl Val {
     pub fn is_float(&self) -> bool {
         matches!(self, Self::Float64(_))
@@ -101,6 +144,10 @@ impl Val {
 
     pub fn is_int(&self) -> bool {
         matches!(self, Val::Int64(_))
+    }
+
+    pub fn is_usize(&self) -> bool {
+        matches!(self, Val::Usize(_))
     }
 
     pub fn is_str(&self) -> bool {
@@ -155,7 +202,7 @@ impl DataFrame {
         let headers = raw[0].clone();
         let mut df_index = HashSet::new();
         let data = raw[1..].iter().enumerate().map(|(row_idx, row)| {
-            let index = Val::Usize(row_idx);
+            let index = Val::from(row_idx);
             if !df_index.contains(&index) {
                 df_index.insert(index.clone());
             }
@@ -232,7 +279,7 @@ mod tests {
     fn df() -> DataFrame {
         let csv = "name,nationality,xg,goals
 Lionel Messi,Argentine,66.66,66
-C. Ronaldo,Portugal,0.69,3
+C. Ronaldo,Portugal,-0.69,3
 Darwin Nunez,Uruguay,69.69,6969
 M. Balotelli,Italy,8.88,888
 ";
@@ -264,6 +311,25 @@ M. Balotelli,Italy,8.88,888
         );
         assert!(row_4.is_none());
 
+    }
+
+    #[test]
+    fn modify_col_dtype() -> Result<(), Error> {
+        let mut df = df();
+
+        df.loc("goals", |val| {
+            if let Val::Int64(num) = val {
+                *val = Val::Usize(*num as usize);
+            }
+        })?;
+
+        df.col("goals").inspect(|values| {
+            values.iter().for_each(|v| {
+                assert!(v.is_usize());
+            });
+        });
+
+        Ok(())
     }
 
     #[test]

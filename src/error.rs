@@ -4,15 +4,23 @@ use std::io;
 pub enum Error {
     Io(io::ErrorKind),
     HeaderNotFound(String),
-    Other(String)
+    Other(String),
+    ValToString,
+    ValToFloat64,
+    ValToInt64,
+    ValToUsize
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
-            Error::Io(kind) => kind.to_string(),
-            Error::HeaderNotFound(h) => format!("Header {h} doesn't exist"),
-            Error::Other(s) => s.to_string(),
+            Self::Io(kind) => kind.to_string(),
+            Self::HeaderNotFound(h) => format!("Header {h} doesn't exist"),
+            Self::Other(s) => s.to_string(),
+            Self::ValToString
+            | Self::ValToFloat64
+            | Self::ValToInt64
+            | Self::ValToUsize => "Incompatible type conversion".to_string()
         };
 
         f.write_str(text.as_str())
