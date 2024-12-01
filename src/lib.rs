@@ -1,40 +1,36 @@
 use std::{
     collections::HashMap,
-    io::{self, BufReader, Read},
+    io::{BufReader, Read},
     path::Path,
 };
 
+mod error;
+
+pub use error::Error;
+
 #[derive(Debug)]
-pub enum Error {
-    Io(io::ErrorKind),
-    HeaderNotFound(String),
-    Other(String)
+pub enum Val {
+    String(String),
+    Int64(i64),
+    Float64(f64),
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let text = match self {
-            Error::Io(kind) => kind.to_string(),
-            Error::HeaderNotFound(h) => format!("Header {h} doesn't exist"),
-            Error::Other(s) => s.to_string(),
-        };
-
-        f.write_str(text.as_str())
+impl From<&str> for Val {
+    fn from(value: &str) -> Self {
+        value.parse::<i64>()
+            .map_or_else(|_| {
+                value.parse::<f64>().map_or_else(|_| Val::String(value.to_string()),
+                    Val::Float64
+                )
+            },
+            |num| Val::Int64(num))
     }
 }
-
-impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
-        Self::Io(value.kind())
-    }
-}
-
-impl std::error::Error for Error {}
 
 #[derive(Debug)]
 pub struct DataFrame {
     headers: Vec<String>,
-    rows: Vec<Vec<String>>,
+    rows: Vec<Vec<Val>>,
 }
 
 impl DataFrame {
@@ -54,20 +50,24 @@ impl DataFrame {
             .map(|line| line.split(",").map(ToString::to_string).collect::<Vec<_>>())
             .collect::<Vec<_>>();
         let headers = data[0].clone();
-        let rows = data[1..].to_vec();
+        let rows = data[1..].iter().map(|row| {
+            row.iter().map(|c| {
+                Val::from(c.as_str())
+            }).collect::<Vec<_>>()
+        }).collect::<Vec<_>>();
 
         Self { headers, rows }
     }
 
-    pub fn col(&self, header: &str) -> Option<Vec<&str>> {
+    pub fn col(&self, header: &str) -> Option<Vec<&Val>> {
         self.headers.iter().position(|h| *h == header).map(|idx| {
-            self.rows.iter().map(|row| row[idx].as_str()).collect::<Vec<_>>()
+            self.rows.iter().map(|row| &row[idx]).collect::<Vec<_>>()
         })
     }
 
-    pub fn row(&self, idx: usize) -> Option<HashMap<&str, &str>> {
+    pub fn row(&self, idx: usize) -> Option<HashMap<&str, &Val>> {
         let len = self.rows.len();
-        if idx > len {
+        if idx >= len {
             return None;
         }
 
@@ -75,7 +75,7 @@ impl DataFrame {
             .headers
             .iter()
             .zip(&self.rows[idx])
-            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .map(|(k, v)| (k.as_str(), v))
             .collect::<HashMap<_, _>>();
 
         Some(res)
@@ -85,7 +85,7 @@ impl DataFrame {
         self.headers.iter().map(|header| header.as_str()).collect::<Vec<_>>()
     }
 
-    pub fn loc<F: FnMut(&mut String)>(&mut self, header: &str, mut f: F) -> Result<(), Error> {
+    pub fn loc<F: FnMut(&mut Val)>(&mut self, header: &str, mut f: F) -> Result<(), Error> {
         self.headers.iter().position(|h| h == header).map(|idx| {
             self.rows.iter_mut().for_each(|row| {
                 if let Some(s) = row.get_mut(idx) { f(s) };
@@ -99,7 +99,7 @@ impl DataFrame {
 mod tests {
     use super::*;
 
-    fn read() -> DataFrame {
+    fn df() -> DataFrame {
         let csv = "name,nationality,xg
 Lionel Messi,Argentine,66.66
 C. Ronaldo,Portugal,0.69
@@ -111,7 +111,7 @@ M. Balotello,Italia,8.88
 
     #[test]
     fn col() {
-        let df = read();
+        let df = df();
         let headers = df.get_headers();
 
         headers.iter().for_each(|header| {
@@ -121,18 +121,44 @@ M. Balotello,Italia,8.88
     }
 
     #[test]
-    fn loc() -> Result<(), Error> {
-        let mut df = read();
-        let headers = df.get_headers();
-        let header = headers.first().map(ToString::to_string).unwrap();
+    fn row() {
+        let df = df();
+        let row_3 = df.row(3);
+        let row_4 = df.row(4);
+        assert!(row_3.is_some());
+        assert!(row_4.is_none())
+    }
 
-        df.loc(header.as_str(), |column| {
-            *column += " modify";
+    #[test]
+    fn loc() -> Result<(), Error> {
+        let mut df = df();
+        let headers = df
+            .get_headers()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        headers.iter().try_for_each(|header| {
+            df.loc(header, |val| {
+                match val {
+                    Val::String(s) => *s += " modify",
+                    Val::Int64(num) => *num -= 6969,
+                    Val::Float64(num) => *num += 6.9,
+                }
+            })?;
+
+            Ok::<(), Error>(())
         })?;
 
-        df.col(header.as_str()).map(|col| {
-            col.iter().for_each(|val| {
-                assert!(val.contains("modify"));
+        headers.iter().for_each(|header| {
+            df.col(header).map(|col| {
+                col.iter().for_each(|val| {
+                    match val {
+                        Val::String(s) => assert!(s.contains("modify")),
+                        Val::Int64(num) => assert!(num.is_negative()),
+                        Val::Float64(num) => assert!(num.signum() == 1.0),
+                    }
+                });
             });
         });
 
