@@ -4,11 +4,13 @@ use std::io;
 pub enum Error {
     Io(io::ErrorKind),
     HeaderNotFound(String),
-    Other(String),
+    ValParseError(String),
+    InvalidDataType(String),
     ValToString,
     ValToFloat64,
     ValToInt64,
-    ValToUsize
+    ValToUsize,
+    Other(String),
 }
 
 impl std::fmt::Display for Error {
@@ -16,6 +18,8 @@ impl std::fmt::Display for Error {
         let text = match self {
             Self::Io(kind) => kind.to_string(),
             Self::HeaderNotFound(h) => format!("Header {h} doesn't exist"),
+            Self::ValParseError(p) => format!("Unable to parse {p} into Val"),
+            Self::InvalidDataType(s) => s.to_string(),
             Self::Other(s) => s.to_string(),
             Self::ValToString
             | Self::ValToFloat64
