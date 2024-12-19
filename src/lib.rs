@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     hash::Hash,
     io::{BufReader, Read},
     path::Path
@@ -15,6 +15,17 @@ pub enum Val {
     Usize(usize),
     Int64(i64),
     Float64(f64),
+}
+
+impl std::fmt::Display for Val {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Val::String(s) => write!(f, "{}", s),
+            Val::Usize(u) => write!(f, "{}", u),
+            Val::Int64(i) => write!(f, "{}", i),
+            Val::Float64(f64) => write!(f, "{}", f64),
+        }
+    }
 }
 
 impl Hash for Val {
@@ -155,31 +166,62 @@ impl Val {
     }
 }
 
-#[derive(Debug)]
-pub struct Row {
-    index: Val,
-    values: HashMap<String, Val>
-}
-
-impl Row {
-    fn get_val(&self, header: &str) -> Option<&Val> {
-        self.values.get(header)
-    }
-
-    fn get_mut_val(&mut self, header: &str) -> Option<&mut Val> {
-        self.values.get_mut(header)
-    }
-
-    fn values(&self) -> HashMap<&str, &Val> {
-        self.values.iter().map(|(k, v)| (k.as_str(), v)).collect()
-    }
-}
-
-#[derive(Debug)]
 pub struct DataFrame {
     headers: Vec<String>,
-    index: HashSet<Val>,
-    data: Vec<Row>,
+    data: Vec<Val>,
+    width: usize,
+    height: usize
+}
+
+impl std::fmt::Debug for DataFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let len = self.headers.iter().filter_map(|header| {
+            let Some(col) = self.col(header) else { return None };
+            let len = col.iter().map(|val| val.to_string().len()).max();
+            len
+        }).collect::<Vec<_>>();
+        len.iter().enumerate().try_for_each(|(i, spacing)| {
+            let spacing = spacing + 4;
+            if i == len.len() - 1 {
+                write!(f, "+{:->spacing$}+", "")
+            } else {
+                write!(f, "+{:->spacing$}", "")
+            }
+        })?;
+        self.headers.iter().zip(&len).enumerate().try_for_each(|(i, (header, len))| {
+            let spacing = (len - header.len()) + 5;
+            if i % self.width == 0 {
+                write!(f, "\n| {}{:>spacing$}", header, "| ")
+            } else {
+                write!(f, "{}{:>spacing$}", header, "| ")
+            }
+        })?;
+        writeln!(f, "")?;
+        len.iter().enumerate().try_for_each(|(i, spacing)| {
+            let spacing = spacing + 4;
+            if i == len.len() - 1 {
+                write!(f, "+{:->spacing$}+", "")
+            } else {
+                write!(f, "+{:->spacing$}", "")
+            }
+        })?;
+        self.data.iter().enumerate().try_for_each(|(i, d)| {
+            let spacing = (len[i % self.width] - d.to_string().len()) + 5;
+            if i % self.width == 0 {
+                write!(f, "\n| {}{:>spacing$}", d, "| ")
+            } else {
+                write!(f, "{}{:>spacing$}", d, "| ")
+            }
+        })?;
+        len.iter().enumerate().try_for_each(|(i, spacing)| {
+            let spacing = spacing + 4;
+            if i == 0 {
+                write!(f, "\n+{:->spacing$}+", "")
+            } else {
+                write!(f, "{:->spacing$}+", "")
+            }
+        })
+    }
 }
 
 impl DataFrame {
@@ -193,81 +235,61 @@ impl DataFrame {
         Ok(Self::read_str(s))
     }
 
-    // TODO: ensure each column has the same Val
     pub fn read_str(input: String) -> Self {
+        let mut width = 0;
+        let mut height = 0;
         let raw = input
             .lines()
-            .map(|line| line.split(",").map(ToString::to_string).collect::<Vec<_>>())
+            .flat_map(|line| {
+                height += 1;
+                let l = line.split(",").map(ToString::to_string).collect::<Vec<_>>();
+                width = l.len();
+                l
+            })
             .collect::<Vec<_>>();
-        let headers = raw[0].clone();
-        let mut df_index = HashSet::new();
-        let data = raw[1..].iter().enumerate().map(|(row_idx, row)| {
-            let index = Val::from(row_idx);
-            if !df_index.contains(&index) {
-                df_index.insert(index.clone());
-            }
-            let values = row.iter().enumerate().map(|(val_idx, val)| {
-                let header = headers[val_idx].clone();
-                (header, Val::from(val.as_str()))
-            }).collect::<HashMap<_, _>>();
+        let headers = raw[0..width].to_vec();
+        height -= 1;
+        let data = raw[width..].iter().map(|d| Val::from(d.as_str())).collect();
 
-            Row { index, values }
-
-        }).collect::<Vec<_>>();
-
-        Self { headers, index: df_index, data }
+        Self { headers, data, width, height }
     }
 
     pub fn col(&self, header: &str) -> Option<Vec<&Val>> {
-        self.data.iter().map(|row| {
-            row.get_val(header)
-        }).collect::<Option<Vec<_>>>()
+        let Some(header) = self.headers.iter().position(|h| h == header) else { return None };
+        Some(self.data.iter().enumerate().filter_map(|(i, d)| {
+            if i % self.width == header {
+                Some(d)
+            } else { None }
+        }).collect())
     }
 
-    pub fn row<I: Into<Val>>(&self, idx: I) -> Option<HashMap<&str, &Val>> {
-        match idx.into() {
-            Val::String(ref s) => {
-                if !self.index.contains(&Val::from(s)) {
-                    None
-                } else {
-                    let res = self.data
-                        .iter()
-                        .filter(|row| row.index == Val::from(s))
-                        .flat_map(|row| row.values())
-                        .collect::<HashMap<_, _>>();
-                    Some(res)
-                }
-            }
-            Val::Usize(u) => {
-                let len = self.data.len();
-                if u >= len {
-                    None
-                } else {
-                    let res = self.data
-                        .iter()
-                        .filter(|row| row.index == Val::Usize(u))
-                        .flat_map(|row| row.values())
-                        .collect::<HashMap<_, _>>();
-                    Some(res)
-                }
-            },
-            _ => panic!("f64 & i64 can't be used as index")
+    pub fn row(&self, idx: usize) -> Option<HashMap<&str, &Val>> {
+        if idx >= self.height {
+            return None;
         }
+        Some(
+            self
+                .headers
+                .iter()
+                .zip(&self.data[idx * self.width..self.width * (1 + idx)])
+                .map(|(h, v)| (h.as_str(), v))
+                .collect()
+        )
 
     }
 
-    pub fn headers(&self) -> Vec<&str> {
-        self.headers.iter().map(|header| header.as_str()).collect::<Vec<_>>()
+    pub fn headers(&self) -> &Vec<String> {
+        &self.headers
     }
 
     pub fn loc<F: FnMut(&mut Val)>(&mut self, header: &str, mut f: F) -> Result<(), Error> {
-        self.data.iter_mut().try_for_each(|row| {
-            if let Some(val) = row.get_mut_val(header) {
-                f(val);
-                Ok(())
-            } else {
-                Err(Error::HeaderNotFound(header.to_string()))
+        let Some(header) = self.headers.iter().position(|h| h == header) else { return Err(Error::HeaderNotFound(header.to_string())) };
+        self.data.iter_mut().enumerate().try_for_each(|(idx, d)| {
+            if idx % self.width == header {
+                f(d)
             }
+
+            Ok::<(), Error>(())
         })
     }
 }
@@ -292,7 +314,7 @@ M. Balotelli,Italy,8.88,888
         let headers = df.headers();
 
         headers.iter().for_each(|header| {
-            let col = df.col(*header);
+            let col = df.col(header);
             assert!(col.is_some());
         });
     }
@@ -300,8 +322,12 @@ M. Balotelli,Italy,8.88,888
     #[test]
     fn row() {
         let df = df();
+        let headers = df.headers();
         let row_3 = df.row(3usize);
         let row_4 = df.row(4usize);
+
+        let pos_of_xg = headers.iter().position(|h| h == "xg");
+        assert!(pos_of_xg.is_some());
 
         assert!(row_3.is_some_and(|n| {
                 n.get("xg").is_some_and(|val| {
