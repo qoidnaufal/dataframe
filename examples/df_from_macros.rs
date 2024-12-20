@@ -1,11 +1,11 @@
-use dataframe::{Error, Data, Val};
+use dataframe::{Error, Data};
 
-#[derive(Data, Debug)]
+#[derive(Data)]
 struct MyData {
-    name: String,
     nationality: String,
+    name: String,
     xg: f64,
-    goals: usize
+    goals: usize,
 }
 
 fn main() -> Result<(), Error> {

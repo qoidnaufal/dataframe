@@ -63,9 +63,9 @@ impl ParsedTokenStream {
         } else { None }
     }
 
-    fn fields(&self) -> Option<Vec<proc_macro::TokenTree>> {
+    fn fnames(&self) -> Option<Vec<String>> {
         if let Some(ref data) = self.data {
-            Some(data.iter().map(|tree| tree[0].clone()).collect())
+            Some(data.iter().map(|tree| tree[0].to_string()).collect())
         } else { None }
     }
 
@@ -81,13 +81,13 @@ impl ParsedTokenStream {
         let name = self.name();
         let _generics = self.generics();
         let _lifetime = self.lifetime();
-        let _fnames = self.fields();
+        let fnames = self.fnames().unwrap();
         let ftypes = self.ftypes().unwrap();
-        let ftypes_len = ftypes.len();
 
         let token_stream: proc_macro::TokenStream = format!("
             use std::io::{{BufReader, Read}};
-            use dataframe::DataFrame;
+            use dataframe::{{DataFrame, Val}};
+
             impl {name} {{
                 {visibility} fn read_csv(path: &str) -> Result<DataFrame, Error> {{
                     let file = std::fs::File::open(&path)?;
@@ -100,21 +100,37 @@ impl ParsedTokenStream {
                 }}
 
                 {visibility} fn read_str(input: String) -> Result<DataFrame, Error> {{
-                    let mut width = 0;
-                    let mut height = 0;
+                    let mut raw_width = 0;
+                    let mut raw_height = 0;
                     let raw = input
                         .lines()
                         .flat_map(|line| {{
-                            height += 1;
+                            raw_height += 1;
                             let l = line.split(\",\").map(ToString::to_string).collect::<Vec<_>>();
-                            width = l.len();
+                            raw_width = l.len();
                             l
                         }})
                         .collect::<Vec<_>>();
-                    let headers = raw[0..width].to_vec();
-                    height -= 1;
-                    let data = raw[width..].iter().enumerate().map(|(i, d)| {{
-                        let ftyp = {ftypes:?}[i % ({ftypes_len})];
+                    let headers = raw[0..raw_width].to_vec();
+                    let new_pos = {fnames:?}.iter().filter_map(|name| headers.iter().position(|header| header == name)).collect::<Vec<_>>();
+                    raw_height -= 1;
+
+                    let mut cursor = 0;
+                    let mut adv = 0;
+                    let slice = raw[raw_width..].to_vec();
+                    let mut filtered_data = Vec::new();
+                    while cursor < slice.len() {{
+                        let pos = new_pos[cursor % new_pos.len()];
+                        filtered_data.push(slice[pos + adv].to_string());
+                        cursor += 1;
+                        if cursor % new_pos.len() == 0 {{
+                            adv += raw_width;
+                        }}
+                        if pos + adv > slice.len() {{ break }}
+                    }}
+                    
+                    let data = filtered_data.iter().enumerate().map(|(i, d)| {{
+                        let ftyp = {ftypes:?}[i % {ftypes:?}.len()];
                         let val = match ftyp {{
                             \"f64\" => {{Val::Float64(d.parse::<f64>().unwrap())}},
                             \"f32\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
@@ -130,16 +146,16 @@ impl ParsedTokenStream {
                             \"i16\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
                             \"u8\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
                             \"i8\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"String\" => {{Val::String(d.clone())}},
+                            \"String\" => {{Val::String(d.to_string())}},
                             other => {{return Err(Error::InvalidDataType(other.to_string()))}}
                         }};
                         Ok::<Val, Error>(val)
                     }}).collect::<Result<Vec<Val>, Error>>()?;
 
                     let mut df = DataFrame::default();
-                    df.set_headers(headers);
+                    df.set_headers({fnames:?}.iter().map(ToString::to_string).collect());
                     df.set_data(data);
-                    df.set_size(width, height);
+                    df.set_size({fnames:?}.len(), raw_height);
 
                     Ok(df)
                 }}
@@ -179,7 +195,7 @@ impl Cursor {
                             proc_macro::TokenTree::Punct(punct) => punct.as_char() == ',',
                             _ => false
                         }
-                    }).map(|trees| trees.to_vec()).collect::<Vec<_>>();
+                    }).filter(|trees| trees.len() > 0).map(|trees| trees.to_vec()).collect::<Vec<_>>();
                     data.replace(fields);
                 },
                 proc_macro::TokenTree::Ident(ident) => {
