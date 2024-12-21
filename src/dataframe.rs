@@ -14,6 +14,7 @@ pub struct DataFrame {
     height: usize
 }
 
+// FIXME: make it better, i find it kinda messy
 impl std::fmt::Debug for DataFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let lens = self.headers.iter().filter_map(|header| {
@@ -58,6 +59,15 @@ fn printh_borders(lens: &Vec<usize>, f: &mut std::fmt::Formatter<'_>) -> std::fm
 }
 
 impl DataFrame {
+    pub fn new(headers: Vec<String>, data: Vec<Val>, width: usize, height: usize) -> Self {
+        Self {
+            headers,
+            data,
+            width,
+            height,
+        }
+    }
+
     pub fn read_csv<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = std::fs::File::open(&path)?;
         let mut buf = BufReader::new(file);
@@ -88,19 +98,6 @@ impl DataFrame {
         }).collect::<Result<Vec<Val>, Error>>()?;
 
         Ok(Self { headers, data, width, height })
-    }
-
-    pub fn set_headers(&mut self, headers: Vec<String>) {
-        self.headers = headers
-    }
-
-    pub fn set_data(&mut self, data: Vec<Val>) {
-        self.data = data
-    }
-
-    pub fn set_size(&mut self, width: usize, height: usize) {
-        self.width = width;
-        self.height = height;
     }
 
     pub fn col(&self, header: &str) -> Option<Vec<&Val>> {

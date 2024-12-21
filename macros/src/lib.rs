@@ -84,14 +84,15 @@ impl ParsedTokenStream {
         let fnames = self.fnames().unwrap();
         let ftypes = self.ftypes().unwrap();
 
-        let token_stream: proc_macro::TokenStream = format!("
-            use std::io::{{BufReader, Read}};
+        format!("
             use dataframe::{{DataFrame, Val}};
 
             impl {name} {{
-                {visibility} fn read_csv(path: &str) -> Result<DataFrame, Error> {{
+                {visibility} fn read_csv<P: AsRef<std::path::Path>>(path: P) -> Result<DataFrame, Error> {{
+                    use std::io::Read;
+
                     let file = std::fs::File::open(&path)?;
-                    let mut buf = BufReader::new(file);
+                    let mut buf = std::io::BufReader::new(file);
 
                     let mut s = String::new();
                     buf.read_to_string(&mut s)?;
@@ -111,9 +112,21 @@ impl ParsedTokenStream {
                             l
                         }})
                         .collect::<Vec<_>>();
+
                     let headers = raw[0..raw_width].to_vec();
-                    let new_pos = {fnames:?}.iter().filter_map(|name| headers.iter().position(|header| header == name)).collect::<Vec<_>>();
-                    raw_height -= 1;
+                    if {fnames:?}.len() > raw_width {{
+                        let inc_pos = {fnames:?}.iter().position(|fname| !headers.contains(&fname.to_string())).unwrap();
+                        let incompatible = {fnames:?}[inc_pos].to_string();
+                        return Err(Error::IncompatibleStruct {{
+                            struct_fields: {fnames:?}.len(),
+                            csv_columns: raw_width,
+                            incompatible
+                        }})
+                    }}
+                    let new_pos = {fnames:?}
+                        .iter()
+                        .filter_map(|name| headers.iter().position(|header| header == name))
+                        .collect::<Vec<_>>();
 
                     let mut cursor = 0;
                     let mut adv = 0;
@@ -132,37 +145,37 @@ impl ParsedTokenStream {
                     let data = filtered_data.iter().enumerate().map(|(i, d)| {{
                         let ftyp = {ftypes:?}[i % {ftypes:?}.len()];
                         let val = match ftyp {{
-                            \"f64\" => {{Val::Float64(d.parse::<f64>().unwrap())}},
-                            \"f32\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"usize\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"isize\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"u128\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"i128\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"u64\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"i64\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"u32\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"i32\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"u16\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"i16\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"u8\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
-                            \"i8\" => {{Val::Usize(d.parse::<usize>().unwrap())}},
+                            \"f64\" => {{Val::Float64(d.parse::<f64>().unwrap_or_default())}},
+                            \"f32\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"usize\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"isize\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"u128\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"i128\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"u64\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"i64\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"u32\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"i32\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"u16\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"i16\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"u8\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
+                            \"i8\" => {{Val::Usize(d.parse::<usize>().unwrap_or_default())}},
                             \"String\" => {{Val::String(d.to_string())}},
                             other => {{return Err(Error::InvalidDataType(other.to_string()))}}
                         }};
                         Ok::<Val, Error>(val)
                     }}).collect::<Result<Vec<Val>, Error>>()?;
 
-                    let mut df = DataFrame::default();
-                    df.set_headers({fnames:?}.iter().map(ToString::to_string).collect());
-                    df.set_data(data);
-                    df.set_size({fnames:?}.len(), raw_height);
+                    let df = DataFrame::new(
+                        {fnames:?}.iter().map(ToString::to_string).collect(),
+                        data,
+                        {fnames:?}.len(),
+                        raw_height - 1
+                    );
 
                     Ok(df)
                 }}
             }}
-        ").parse().unwrap();
-
-        token_stream
+        ").parse().unwrap()
     }
 }
 
@@ -189,7 +202,6 @@ impl Cursor {
             match &self.buffer[self.offset] {
                 proc_macro::TokenTree::Group(group) => {
                     let group_data = group.stream().into_iter().collect::<Vec<_>>();
-                    // what's better? to include ',', or not?
                     let fields = group_data.split(|tree| {
                         match tree {
                             proc_macro::TokenTree::Punct(punct) => punct.as_char() == ',',
@@ -237,7 +249,6 @@ impl Cursor {
                             if let Some(closing) = closing {
                                 generics.replace(
                                     self
-                                        // what's better? to include '<' & '>', or not?
                                         .buffer[self.offset + 1..*closing + self.offset]
                                         .iter()
                                         .cloned()
@@ -264,8 +275,8 @@ impl Cursor {
     }
 }
 
-#[proc_macro_derive(Data)]
-pub fn derive_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+#[proc_macro_derive(DataFrame)]
+pub fn derive_dataframe(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut cursor = Cursor::new(input);
     let parsed = cursor.parse().unwrap();
 

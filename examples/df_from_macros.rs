@@ -1,6 +1,6 @@
-use dataframe::{Error, Data};
+use dataframe::{Error, macros::DataFrame};
 
-#[derive(Data)]
+#[derive(DataFrame)]
 struct MyData {
     nationality: String,
     name: String,

@@ -36,7 +36,7 @@ impl Default for Val {
 impl std::fmt::Display for Val {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Val::String(val) => write!(f, "{}", val),
+            Val::String(val) => write!(f, "{:?}", val),
             Val::Isize(val) => write!(f, "{}", val),
             Val::Usize(val) => write!(f, "{}", val),
             Val::Int128(val) => write!(f, "{}", val),

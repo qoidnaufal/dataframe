@@ -4,5 +4,5 @@ mod val;
 
 pub use dataframe::DataFrame;
 pub use error::Error;
-pub use macros::Data;
+pub use macros;
 pub use val::Val;
